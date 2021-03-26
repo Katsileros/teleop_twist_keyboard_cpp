@@ -1,5 +1,6 @@
 #include <ros/ros.h>
 #include <geometry_msgs/Twist.h>
+#include "std_msgs/Bool.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -43,6 +44,18 @@ std::map<char, std::vector<float>> speedBindings
   {'c', {1, 0.9}}
 };
 
+// Map for STOP keys -> Addon by TerraRobotics
+std::map<char, std::vector<float>> stopBindings
+{
+  {' ', {0, 0, 0, 0}}
+};
+
+// Map for mode selection keys -> Addon by TerraRobotics
+std::map<char, std::vector<float>> modeBindings
+{
+  {']', {0, 0, 0, 0}}
+};
+
 // Reminder message
 const char* msg = R"(
 
@@ -61,6 +74,8 @@ For Holonomic mode (strafing), hold down the shift key:
 
 t : up (+z)
 b : down (-z)
+
+Automatic/Manual Switch Mode Button: ']'
 
 anything else : stop
 
@@ -115,9 +130,11 @@ int main(int argc, char** argv)
 
   // Init cmd_vel publisher
   ros::Publisher pub = nh.advertise<geometry_msgs::Twist>("cmd_vel", 1);
+  ros::Publisher pub_bool = nh.advertise<std_msgs::Bool>("auto_mode", 1);
 
   // Create Twist message
   geometry_msgs::Twist twist;
+  std_msgs::Bool auto_mode;
 
   printf("%s", msg);
   printf("\rCurrent: speed %f\tturn %f | Awaiting command...\r", speed, turn);
@@ -126,6 +143,11 @@ int main(int argc, char** argv)
 
     // Get the pressed key
     key = getch();
+
+    if(modeBindings.count(key) == 1)
+    {
+      auto_mode.data = !auto_mode.data;
+    }
 
     // If the key corresponds to a key in moveBindings
     if (moveBindings.count(key) == 1)
@@ -148,7 +170,15 @@ int main(int argc, char** argv)
 
       printf("\rCurrent: speed %f\tturn %f | Last command: %c   ", speed, turn, key);
     }
+    else if (stopBindings.count(key) == 1)
+    {
+      x = 0;
+      y = 0;
+      z = 0;
+      th = 0;
 
+      ROS_INFO("KEYBOARD STOP BUTTON DETECTED");
+    }
     // Otherwise, set the robot to stop
     else
     {
@@ -160,7 +190,16 @@ int main(int argc, char** argv)
       // If ctrl-C (^C) was pressed, terminate the program
       if (key == '\x03')
       {
-        printf("\n\n                 .     .\n              .  |\\-^-/|  .    \n             /| } O.=.O { |\\\n\n                 CH3EERS\n\n");
+        printf("ABORTING KEYBOARD TELEOP DUE TO CTRL+C TRIGGER");
+        // Update the Twist message
+        twist.linear.x = x * speed;
+        twist.linear.y = y * speed;
+        twist.linear.z = z * speed;
+        twist.angular.x = 0;
+        twist.angular.y = 0;
+        twist.angular.z = th * turn;
+        // Publish it and resolve any remaining callbacks
+        pub.publish(twist);
         break;
       }
 
@@ -177,6 +216,7 @@ int main(int argc, char** argv)
     twist.angular.z = th * turn;
 
     // Publish it and resolve any remaining callbacks
+    pub_bool.publish(auto_mode);
     pub.publish(twist);
     ros::spinOnce();
   }
